@@ -10,7 +10,7 @@ datasource db {
 
 generator erd {
   provider = "prisma-erd-generator"
-  theme = "dark"
+  theme = "forest"
 }
 
 //
