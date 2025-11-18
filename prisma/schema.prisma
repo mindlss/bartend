@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator erd {
+  provider = "prisma-erd-generator"
+  theme = "dark"
+}
+
+//
+// USERS
+//
+model User {
+  id        Int       @id @default(autoincrement())
+  username  String    @unique
+  password  String
+  role      String    // "admin" | "bartender"
+  createdAt DateTime  @default(now())
+
+  shifts    Shift[]
+  checks    Check[]
+}
+
+//
+// SHIFTS — смены, сюда будут привязаны события
+//
+model Shift {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id])
+  openedAt   DateTime  @default(now())
+  closedAt   DateTime?
+  notes      String?
+
+  inventoryEvents InventoryEvent[]
+  checks         Check[]
+}
+
+//
+// INGREDIENTS
+//
+model Ingredient {
+  id              Int       @id @default(autoincrement())
+  name            String
+  category        String?
+  image           String?
+  pumpMlPerClick  Decimal?  @db.Decimal(5,2)
+  remainingMl     Decimal   @db.Decimal(10,2)
+  isActive        Boolean   @default(true)
+
+  recipeIngredients RecipeIngredient[]
+  inventoryEvents   InventoryEvent[]
+  checkItems        CheckItem[]
+}
+
+//
+// GLASS TYPES
+//
+model GlassType {
+  id         Int       @id @default(autoincrement())
+  name       String
+  capacityMl Int
+  count      Int
+  image      String?
+
+  inventoryEvents InventoryEvent[]
+  checkItems CheckItem[]
+}
+
+//
+// RECIPES — текстовый рецепт коктейля
+//
+model Recipe {
+  id           Int        @id @default(autoincrement())
+  name         String
+  content      String?    @db.Text
+  image        String?
+  price        Int        // базовая цена (не используется в чеке)
+  isActive     Boolean    @default(true)
+
+  ingredients  RecipeIngredient[]
+  checkItems   CheckItem[]
+}
+
+
+//
+// RECIPE INGREDIENTS — состав коктейля
+//
+model RecipeIngredient {
+  id           Int        @id @default(autoincrement())
+  recipeId     Int
+  ingredientId Int
+  amountMl     Decimal    @db.Decimal(10,2)
+
+  recipe       Recipe     @relation(fields: [recipeId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+}
+
+//
+// CHECKS — один чек
+//
+model Check {
+  id          Int        @id @default(autoincrement())
+  shiftId     Int?
+  shift       Shift?     @relation(fields: [shiftId], references: [id])
+  userId      Int?
+  user        User?      @relation(fields: [userId], references: [id])
+  status      String     // "draft" | "reserved" | "confirmed"
+  totalPrice  Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items       CheckItem[]
+  reservation Reservation?
+}
+
+//
+// CHECK ITEMS — отдельная позиция в чеке
+// здесь хранятся цены
+//
+model CheckItem {
+  id            Int         @id @default(autoincrement())
+  checkId       Int
+  type          String      // "recipe" | "ingredient"
+  recipeId      Int?
+  ingredientId  Int?
+  glassTypeId   Int?
+  quantity      Int         @default(1)
+  price         Int         // используется везде
+  payload       Json?       // snapshot рецепта или доп данные
+  createdAt     DateTime    @default(now())
+
+  check         Check       @relation(fields: [checkId], references: [id])
+  recipe        Recipe?     @relation(fields: [recipeId], references: [id])
+  ingredient    Ingredient? @relation(fields: [ingredientId], references: [id])
+  glassType     GlassType?  @relation(fields: [glassTypeId], references: [id])
+}
+
+//
+// RESERVATION — одна на чек
+// хранит снимок всех списаний
+//
+model Reservation {
+  id          Int       @id @default(autoincrement())
+  checkId     Int       @unique
+  payload     Json      // сколько ml резервируем по каждому ингредиенту
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  check       Check     @relation(fields: [checkId], references: [id])
+}
+
+//
+// INVENTORY EVENTS — полное event-sourcing хранилище
+//
+model InventoryEvent {
+  id           Int        @id @default(autoincrement())
+  type         String     // refill | adjust | reservation_create | reservation_expire | confirm | reversal | glass_broken
+  ingredientId Int?
+  glassTypeId  Int?
+  shiftId      Int?
+  mlDelta      Decimal?   @db.Decimal(10,2)
+  countDelta   Int?
+  payload      Json?
+  createdAt    DateTime   @default(now())
+
+  ingredient   Ingredient? @relation(fields: [ingredientId], references: [id])
+  glassType    GlassType?  @relation(fields: [glassTypeId], references: [id])
+  shift        Shift?      @relation(fields: [shiftId], references: [id])
+}
